@@ -18,6 +18,7 @@ def genParms():
     np.random.seed(11)
     random.seed(11)
     nMarkets = 100
+    marketProbs = {'McDonalds': 0.85, 'BK': 0.75, 'Sweetgreen': 0.55, 'Wendy\'s': 0.55}
     itemDict = {'McDonalds': ["Quarter_Pounder", "McNuggets", 'Southwest_Salad'], 
                 'BK': ['Whopper', 'Chicken_Tenders'],
                 'Wendy\'s': ['Classic_Double', 'Wendys_Nuggets', 'Garden_Salad'],
@@ -30,46 +31,41 @@ def genParms():
     firms = ["McDonalds", "BK", "Sweetgreen", "Wendy's"]
     markets = range(0,nMarkets)
     characteristics = {}
-    ksais = {}
-    # not gonna let this vary by market
-    ksais['outside'] = 0
-    for firm in firms:
-        characteristics[firm] = {}
-        for item in itemDict[firm]:
-            iType = itemTypes[item]
-            # price is always set to 1 since it will be determined endogenously in a later method (which?)
-            characteristics[firm][item]= {}
-            characteristics[firm][item]['price'] = 1
-            if iType == 'b':
-                characteristics[firm][item]['protein'] = np.random.randint(10,20)
-                characteristics[firm][item]['salt'] = np.random.randint(15,25)
-                characteristics[firm][item]['fat'] = np.random.randint(35,45)
-                characteristics[firm][item]['veggies'] = 0
-            elif iType == 'c':
-                characteristics[firm][item]['protein'] = np.random.randint(10,20)
-                characteristics[firm][item]['salt'] = np.random.randint(15,25)
-                characteristics[firm][item]['fat'] = np.random.randint(10,20)
-                characteristics[firm][item]['veggies'] =  0
-            elif iType == 's':
-                characteristics[firm][item]['protein'] = np.random.randint(5,10)
-                characteristics[firm][item]['salt'] = np.random.randint(15,25)
-                characteristics[firm][item]['fat'] = np.random.randint(0,5)
-                characteristics[firm][item]['veggies'] =  np.random.randint(2,3)
     # I tested the ksais and market shares turned out to be extremely sensitive to them. Thus I picked some good looking baseline
     # values and then allowed them to vary market-by-market within a relatively narrow range.
-    ksaiDict = {"Quarter_Pounder": , "McNuggets": 'c', 'Southwest_Salad': 's',
-                  'Whopper': 'b', 'Chicken_Tenders': 'c',
-                   'Classic_Double': 'b', 'Wendys_Nuggets': 'c', 'Garden_Salad': 's',
-                    'Chicken_Bowl': 'c', 'Rustic_Salad': 's'}
-    for market in markets:
-        ksais['outside'][market] = np.random.randint(0,10)
-    betas = [1.0, -0.45, -0.15]
-    sigmas = [1.5,0.6,0.6]
-    nus = []
-    for i in range(0,3):
-        nus.append(np.random.normal(0,.2))
-
-    parameters = {'characteristics': characteristics, 'ksais':ksais, 'betas': betas, 'price': -2.5, 'nus': nus, 'sigmas': sigmas, 'nPerMarket': 10000, 'numMarkets':nMarkets}
+    ksaiDict = {"Quarter_Pounder": 2, "McNuggets": 3.2, 'Southwest_Salad': -2.75,
+                  'Whopper': 1.8, 'Chicken_Tenders': 2.75,
+                   'Classic_Double': 3, 'Wendys_Nuggets': 2.3, 'Garden_Salad': -8.75,
+                    'Chicken_Bowl': 4, 'Rustic_Salad': 0}
+    # as with the xi values, so with prices. Shares are very sensitive, so it was best to test them out in advance and keep minimally
+    # variable values
+    priceDict = {"Quarter_Pounder": 2.2, "McNuggets": 1.8, 'Southwest_Salad': 1.6,
+                  'Whopper': 3.0, 'Chicken_Tenders': 2,
+                   'Classic_Double': 2, 'Wendys_Nuggets': 2, 'Garden_Salad': 1.5,
+                    'Chicken_Bowl': 5, 'Rustic_Salad': 7}
+    for firm in firms:
+        characteristics[firm] = {}
+        for market in markets:
+            characteristics[firm][market] = {}
+            for item in itemDict[firm]:
+                iType = itemTypes[item]
+                characteristics[firm][market][item]= {}
+                if iType == 'b':
+                    characteristics[firm][market][item]['protein'] = np.random.randint(17,21)
+                    characteristics[firm][market][item]['fat'] = np.random.randint(32,37)
+                elif iType == 'c':
+                    characteristics[firm][market][item]['protein'] = np.random.randint(16,17)
+                    characteristics[firm][market][item]['fat'] = np.random.randint(25,30)
+                elif iType == 's':
+                    characteristics[firm][market][item]['protein'] = np.random.randint(10,15)
+                    characteristics[firm][market][item]['fat'] = np.random.randint(0,4)
+                characteristics[firm][market][item]['price'] = priceDict[item] + np.random.uniform(-0.2,0.2)
+                characteristics[firm][market][item]['ksai'] = ksaiDict[item] + np.random.uniform(-0.2,0.2)
+    betas = [-0.5, 0.8, -0.2] # betas are for price, protein, fat - respectively
+    sigmas = [0.2, 0.5, 0.5] 
+    nus = [0, 0, 0]
+    parameters = {'characteristics': characteristics, 'betas': betas, 'nus': nus, 'sigmas': sigmas, 
+                    'nPerMarket': 500, 'nMarkets': nMarkets, 'mProbs': marketProbs}
     return parameters
 
 def outChars(parms, path, names):
@@ -78,107 +74,112 @@ def outChars(parms, path, names):
     dta = parms['characteristics']
     with open(outFile, 'w+', newline='') as file:
         writer = csv.writer(file, delimiter=',', quotechar='\"')
-        header = ['firm', 'product', 'price', 'protein', 'fat', 'salt', 'veggies']
+        header = ['firm', 'market','product', 'price', 'protein', 'fat']
         writer.writerow(header)
         for f in dta:
-            for item in dta[f]:
-                row = [f]
-                row.append(item)
-                row.append(dta[f][item]['price'])
-                row.append(dta[f][item]['protein'])
-                row.append(dta[f][item]['fat'])
-                row.append(dta[f][item]['salt'])
-                row.append(dta[f][item]['veggies'])
-                writer.writerow(row)
-
-
-
-def addWendys(parms):
-    chars = parms['characteristics']
-    ksais = parms['ksais']
-    chars['Wendys'] = {}
-    ksais['Wendys'] = {}
-    for market in chars['McDonalds']:
-        chars['Wendys'][market] = {}
-        chars['Wendys'][market]['price'] = np.random.randint(2,4)
-        chars['Wendys'][market]['protein'] = np.random.randint(15,25)
-        chars['Wendys'][market]['salt'] = np.random.uniform(30,50)
-        chars['Wendys'][market]['fat'] = np.random.uniform(5,10)
-        ksais['Wendys'][market] = np.random.normal(3,1)
-    parameters = {'characteristics': chars, 'ksais':ksais, 'betas': parms['betas'], 'price': parms['price'], 'nus': parms['nus'], 'sigmas': parms['sigmas']}
-    return parameters
+            for market in dta[f]:
+                for item in dta[f][market]:
+                    row = [f]
+                    row.append(market)
+                    row.append(item)
+                    row.append(dta[f][market][item]['price'])
+                    row.append(dta[f][market][item]['protein'])
+                    row.append(dta[f][market][item]['fat'])
+                    writer.writerow(row)
 
 def genPeople(parms, n):
     iden = 0
-    markets = range(0, parms['numMarkets'])
+    markets = range(0, parms['nMarkets'])
     peopleBetas  = {}
     for i in markets:
-        peopleBetas[i] = []
+        peopleBetas[i] = {}
         for j in range(0, n):
             iden += 1
-            indBetas = [iden, parms['price']]
+            peopleBetas[i][iden] = {}
             for k, val in enumerate(parms['nus']):
-                indBetas.append(np.random.normal(parms['nus'][k], parms['sigmas'][k]) + parms['betas'][k])
-            peopleBetas[i].append(indBetas)
+                personalBeta = np.random.normal(parms['nus'][k], parms['sigmas'][k]) + parms['betas'][k]
+                peopleBetas[i][iden][k] = personalBeta
     return peopleBetas
 
-def simulateChoices(parms, people): 
+def genMarkets(parms):
+    # goal is to randomly filter firms from markets so that we get diversity in firm entry into markets
+    # 0 firm markets are not allowed - if a market is empty, we pick a random (not Wendy's for obvious reasons) firm to be in it
+    num = parms['nMarkets']
+    mProbs = parms['mProbs']
+    marketFirms = {}
+    for i in range(0, num):
+        marketFirms[i] = {}
+        counter = 0
+        for firm in mProbs:
+            rand = np.random.uniform(0,1)
+            marketFirms[i][firm] = True if rand < mProbs[firm] else False 
+            if rand < mProbs[firm]:
+                counter += 1 
+        if counter == 0:
+            rand = np.random.uniform(0,1)
+            if rand < 0.33:
+                marketFirms[i]['McDonalds'] = True
+            elif rand < 0.66:
+                marketFirms[i]['BK'] = True
+            else:
+                marketFirms[i]['Sweetgreen'] = True
+    return marketFirms
+
+def simulateChoices(parms, people, markets, dave=True): 
     choices = {}
     for i, mark in enumerate(people):
         choices[mark] = {}          
         for j, person in enumerate(people[i]):
             utilities = []
+            products = []
             for resto in parms['characteristics'].keys():
-                price = parms['characteristics'][resto][mark]['price']
-                protein = parms['characteristics'][resto][mark]['protein']
-                salt = parms['characteristics'][resto][mark]['salt']
-                fat = parms['characteristics'][resto][mark]['fat']
-                ksai = parms['ksais'][resto][mark] 
-                u = parms['price']*price + people[mark][j][2]*protein + people[mark][j][3]*salt + people[mark][j][4]*fat + ksai + np.random.gumbel()
-              #  print([price, people[mark][j][2], protein, people[mark][j][3], salt, people[mark][j][4], fat, ksai, 10*np.random.gumbel()])
-                utilities.append(u)
-            outside = parms['ksais']['outside'][mark]
-            utilities.append(outside)
-            #if j > 2:
-             #  assert False
+                if (resto != 'Wendy\'s' or dave) and markets[mark][resto]:
+                    for prod in parms['characteristics'][resto][mark]:
+                        price = parms['characteristics'][resto][mark][prod]['price']
+                        protein = parms['characteristics'][resto][mark][prod]['protein']
+                        fat = parms['characteristics'][resto][mark][prod]['fat']
+                        ksai = parms['characteristics'][resto][mark][prod]['ksai']
+                        u = people[mark][person][0]*price + people[mark][person][1]*protein + people[mark][person][2]*fat + ksai + np.random.gumbel()
+                        utilities.append(u)
+                        products.append(prod)
+            # adding the outside option
+            utilities.append(0)
+            products.append('outside')
             choice = np.argmax(utilities)
-            choices[mark][people[mark][j][0]] = choice 
+            choices[mark][person] = products[choice]
     return choices
     
-def marketShares(choices, wendys=False):
+def marketShares(parms, choices, markets, dave=True):
     shares = {"overall": {}, "market": {}}
     nOverall = 0
-    if wendys:
-        tOverall = {'McDonalds': 0, 'BK': 0, 'Sweetgreen': 0, 'Wendys': 0}
-    else:
-        tOverall = {'McDonalds': 0, 'BK': 0, 'Sweetgreen': 0}
+    prodSet = set()
+    for f in parms['characteristics']:
+        for m in parms['characteristics'][f]:
+            for p in parms['characteristics'][f][m]:
+                prodSet.add((f, p))
+    tOverall = {}
+    for pair in prodSet:
+        if pair[0] != 'Wendy\'s' or dave:
+            tOverall[pair[1]] = 0
     for market in choices:
         nMarket = 0
-        if wendys:
-            tMarket = {'McDonalds': 0, 'BK': 0, 'Sweetgreen': 0, 'Wendys': 0}
-        else:
-            tMarket = {'McDonalds': 0, 'BK': 0, 'Sweetgreen': 0}
+        tMarket = {}
+        for pair in prodSet:
+            if pair[0] != 'Wendy\'s' or dave:
+                tMarket[pair[1]] = 0
         for iden in choices[market]:
             c = choices[market][iden]
-            if c == 0:
-                tOverall['McDonalds'] += 1
-                tMarket['McDonalds'] += 1
-            elif c == 1:
-                tOverall['BK'] += 1
-                tMarket['BK'] += 1
-            elif c == 2:
-                tOverall['Sweetgreen'] += 1
-                tMarket['Sweetgreen'] += 1
-            elif c == 3 and wendys:
-                tOverall['Wendys'] += 1
-                tMarket['Wendys'] += 1
+            if c == 'outside':
+                continue
+            tOverall[c] += 1
+            tMarket[c] += 1
             nOverall += 1
             nMarket +=1
-        for store in tMarket:
-            tMarket[store] = float(tMarket[store])/float(nMarket)
+        for prod in tMarket:
+            tMarket[prod] = float(tMarket[prod])/float(nMarket)
         shares['market'][market] = tMarket
-    for store in tOverall:
-        tOverall[store] = float(tOverall[store])/float(nOverall)
+    for prod in tOverall:
+        tOverall[prod] = float(tOverall[prod])/float(nOverall)
     shares['overall'] = tOverall
     return shares  
 
@@ -206,52 +207,57 @@ def sharesAsCSV(shares, path, fileName):
 
 def generateEstimationData(shares, parms, path, fileName):
     outFile = os.path.join(path, fileName)
-    revFirmLookup = {'McDonalds': 0, 'BK': 1, 'Sweetgreen': 2, 'Wendys': 3}
-    pLookup = {'McDonalds': 0, 'BK': 1, 'Sweetgreen': 2, 'Wendys': 3}
+    firmCodes = {'McDonalds': 0, 'BK': 1, 'Sweetgreen': 2, 'Wendy\'s': 3}
+    prodCodes = {"Quarter_Pounder": 0, "McNuggets": 1, 'Southwest_Salad': 2,
+                  'Whopper': 3, 'Chicken_Tenders': 4,
+                   'Classic_Double': 5, 'Wendys_Nuggets': 6, 'Garden_Salad': 7,
+                    'Chicken_Bowl': 8, 'Rustic_Salad': 9}
+    reverseLookup = {"Quarter_Pounder": 'McDonalds', "McNuggets": 'McDonalds', 'Southwest_Salad': 'McDonalds',
+                  'Whopper': 'BK', 'Chicken_Tenders': 'BK',
+                   'Classic_Double': 'Wendy\'s', 'Wendys_Nuggets': 'Wendy\'s', 'Garden_Salad': 'Wendy\'s',
+                    'Chicken_Bowl': 'Sweetgreen', 'Rustic_Salad': 'Sweetgreen'}
     with open(outFile, 'w+', newline='') as file:
         writer = csv.writer(file, delimiter=',', quotechar='\"')
-        header = ['market_ids','firm_ids', 'product_ids', 'shares', 'prices', 'protein', 'fat', 'salt']
+        header = ['market_ids','firm_ids', 'product_ids', 'shares', 'prices', 'protein', 'fat']
         writer.writerow(header)
         for market in shares['market']:
             for prod in shares['market'][market]:
                 row = [market]
-                row.append(revFirmLookup[prod])
-                row.append(pLookup[prod])
+                firm = reverseLookup[prod]
+                row.append(firmCodes[firm])
+                row.append(prodCodes[prod])
                 row.append(shares['market'][market][prod])
-                row.append(parms['characteristics'][prod][market]['price'])
-                row.append(parms['characteristics'][prod][market]['protein'])
-                row.append(parms['characteristics'][prod][market]['fat'])
-                row.append(parms['characteristics'][prod][market]['salt'])
+                row.append(parms['characteristics'][firm][market][prod]['price'])
+                row.append(parms['characteristics'][firm][market][prod]['protein'])
+                row.append(parms['characteristics'][firm][market][prod]['fat'])
                 writer.writerow(row)
-
 
 def main():
     start = dt.datetime.now(pytz.utc)
     path = setPath()
     fns = setFileNames()
     parms = genParms()
-    # check line to output parms to excel, should be commented out in the real run
     outChars(parms, path, fns)
-    assert False
     # need to gen prices endogenously *after* the markets are simulated 
     people = genPeople(parms, parms['nPerMarket'])
-    choices = simulateChoices(parms, people)
-    shares = marketShares(choices)
-    print(shares['overall'])
-    assert False
-    newParms = genParms()
-    newChoices = simulateChoices(newParms, people)
-    newShares = marketShares(newChoices, wendys=True)
-    print(newShares['overall'])
-    # print(newShares['overall'])
+    # randomizes which firms are present in each market
+    markets = genMarkets(parms)
+    # 'dave' is the Wendy's parameter, to include wendy's products in the choice set or not
+    dave = False
+    choices = simulateChoices(parms, people, markets, dave=dave)
+    shares = marketShares(parms, choices, markets, dave=dave)
+    #print(shares['overall'])
+    dave = True
+    newChoices = simulateChoices(parms, people, markets, dave=dave)
+    newShares = marketShares(parms, newChoices, markets, dave=dave)
     path = setPath()
-    sharesAsCSV(shares, path, 'noWendys.csv')
-    sharesAsCSV(newShares, path, 'withWendys.csv')
+    #sharesAsCSV(shares, path, 'noWendys.csv')
+    #sharesAsCSV(newShares, path, 'withWendys.csv')
     #choicesAsCSV(choices, parms, path, 'noWendysChoices.csv')
     #choicesAsCSV(newChoices, newParms, path, 'withWendysChoices.csv')
-    generateEstimationData(newShares, newParms, path, 'withWendysBLPData.csv')
-    print('generated {} markets each with {} observations in {} minutes'.format(parms['numMarkets'], parms['nPerMarket'], \
-        (dt.datetime.now(pytz.utc) - start).seconds/60))
+    generateEstimationData(newShares, parms, path, 'withWendysBLPData.csv')
+    print('generated {} markets each with {} observations in {} minutes'.format(parms['nMarkets'], parms['nPerMarket'], \
+    (dt.datetime.now(pytz.utc) - start).seconds/60))
 
 
 
