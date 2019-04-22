@@ -43,29 +43,39 @@ def genParms():
                   'Whopper': 3.0, 'Chicken_Tenders': 2,
                    'Classic_Double': 2, 'Wendys_Nuggets': 2, 'Garden_Salad': 1.5,
                     'Chicken_Bowl': 5, 'Rustic_Salad': 7}
+    baselineChars = {}
+    for firm in firms:
+        for item in itemDict[firm]:
+            baselineChars[item] = {}
+            iType = itemTypes[item]
+            if iType == 'b':
+                baselineChars[item]['protein'] = np.random.randint(17,21)
+                baselineChars[item]['fat'] = np.random.randint(32,37)
+            elif iType == 'c':
+                baselineChars[item]['protein'] = np.random.randint(16,17)
+                baselineChars[item]['fat'] = np.random.randint(25,30)
+            elif iType == 's':
+                baselineChars[item]['protein'] = np.random.randint(10,15)
+                baselineChars[item]['fat'] = np.random.randint(0,4)
+    corrMatrix = np.matrix('0.05 0.01; 0.01 0.05 ')
     for firm in firms:
         characteristics[firm] = {}
         for market in markets:
             characteristics[firm][market] = {}
             for item in itemDict[firm]:
-                iType = itemTypes[item]
                 characteristics[firm][market][item]= {}
-                if iType == 'b':
-                    characteristics[firm][market][item]['protein'] = np.random.randint(17,21)
-                    characteristics[firm][market][item]['fat'] = np.random.randint(32,37)
-                elif iType == 'c':
-                    characteristics[firm][market][item]['protein'] = np.random.randint(16,17)
-                    characteristics[firm][market][item]['fat'] = np.random.randint(25,30)
-                elif iType == 's':
-                    characteristics[firm][market][item]['protein'] = np.random.randint(10,15)
-                    characteristics[firm][market][item]['fat'] = np.random.randint(0,4)
-                characteristics[firm][market][item]['price'] = priceDict[item] + np.random.uniform(-0.2,0.2)
-                characteristics[firm][market][item]['ksai'] = ksaiDict[item] + np.random.uniform(-0.2,0.2)
+                characteristics[firm][market][item]['protein'] = baselineChars[item]['protein']
+                characteristics[firm][market][item]['fat'] = baselineChars[item]['fat']
+                corrShocks = np.random.multivariate_normal([0, 0], corrMatrix)
+                pShock = corrShocks[0]
+                ksShock = corrShocks[1]
+                characteristics[firm][market][item]['price'] = priceDict[item] + pShock
+                characteristics[firm][market][item]['ksai'] = ksaiDict[item] + ksShock
     betas = [-0.5, 0.8, -0.2] # betas are for price, protein, fat - respectively
     sigmas = [0.2, 0.5, 0.5] 
     nus = [0, 0, 0]
     parameters = {'characteristics': characteristics, 'betas': betas, 'nus': nus, 'sigmas': sigmas, 
-                    'nPerMarket': 500, 'nMarkets': nMarkets, 'mProbs': marketProbs}
+                    'nPerMarket': 1000, 'nMarkets': nMarkets, 'mProbs': marketProbs}
     return parameters
 
 def outChars(parms, path, names):
@@ -159,22 +169,26 @@ def marketShares(parms, choices, markets, dave=True):
                 prodSet.add((f, p))
     tOverall = {}
     for pair in prodSet:
+        # pair[0] is the firm name, pair[1] is the price
         if pair[0] != 'Wendy\'s' or dave:
             tOverall[pair[1]] = 0
     for market in choices:
         nMarket = 0
         tMarket = {}
         for pair in prodSet:
-            if pair[0] != 'Wendy\'s' or dave:
+            # pair[0] is the firm name, pair[1] is the price
+            if (pair[0] != 'Wendy\'s' or dave) and markets[market][pair[0]]:
                 tMarket[pair[1]] = 0
         for iden in choices[market]:
             c = choices[market][iden]
             if c == 'outside':
-                continue
-            tOverall[c] += 1
-            tMarket[c] += 1
-            nOverall += 1
-            nMarket +=1
+                nOverall += 1
+                nMarket +=1
+            else:
+                tOverall[c] += 1
+                tMarket[c] += 1
+                nOverall += 1
+                nMarket +=1
         for prod in tMarket:
             tMarket[prod] = float(tMarket[prod])/float(nMarket)
         shares['market'][market] = tMarket
@@ -182,28 +196,6 @@ def marketShares(parms, choices, markets, dave=True):
         tOverall[prod] = float(tOverall[prod])/float(nOverall)
     shares['overall'] = tOverall
     return shares  
-
-def sharesAsCSV(shares, path, fileName):
-    outFile = os.path.join(path, fileName)
-    with open(outFile, 'w+', newline='') as file:
-        writer = csv.writer(file, delimiter=',', quotechar='\"')
-        if len(shares['overall'].keys()) == 3:
-            header = ['Market', 'McDonalds', 'BK', 'Sweetgreen']
-            firstRow = ['Total']
-            for place in shares['overall']:
-                firstRow.append('{0:.3g}'.format(shares['overall'][place]))
-        else:
-            header = ['Market', 'McDonalds', 'BK', 'Sweetgreen', 'Wendy\'s']
-            firstRow = ['Total']
-            for place in shares['overall']:
-                firstRow.append('{0:.3g}'.format(shares['overall'][place]))
-        writer.writerow(header)
-        writer.writerow(firstRow)
-        for item in shares['market']:
-            row = [item]
-            for place in shares['market'][item]:
-                row.append('{0:.3g}'.format(shares['market'][item][place]))
-            writer.writerow(row)
 
 def generateEstimationData(shares, parms, path, fileName):
     outFile = os.path.join(path, fileName)
