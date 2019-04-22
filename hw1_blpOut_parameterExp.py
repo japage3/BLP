@@ -183,12 +183,12 @@ def marketShares(parms, choices, markets, dave=True):
             c = choices[market][iden]
             if c == 'outside':
                 nOverall += 1
-                nMarket +=1
+                nMarket += 1
             else:
                 tOverall[c] += 1
                 tMarket[c] += 1
                 nOverall += 1
-                nMarket +=1
+                nMarket += 1
         for prod in tMarket:
             tMarket[prod] = float(tMarket[prod])/float(nMarket)
         shares['market'][market] = tMarket
@@ -243,13 +243,9 @@ def main():
     newChoices = simulateChoices(parms, people, markets, dave=dave)
     newShares = marketShares(parms, newChoices, markets, dave=dave)
     path = setPath()
-    #sharesAsCSV(shares, path, 'noWendys.csv')
-    #sharesAsCSV(newShares, path, 'withWendys.csv')
-    #choicesAsCSV(choices, parms, path, 'noWendysChoices.csv')
-    #choicesAsCSV(newChoices, newParms, path, 'withWendysChoices.csv')
     generateEstimationData(newShares, parms, path, 'withWendysBLPData.csv')
     print('generated {} markets each with {} observations in {} minutes'.format(parms['nMarkets'], parms['nPerMarket'], \
-    (dt.datetime.now(pytz.utc) - start).seconds/60))
+      (dt.datetime.now(pytz.utc) - start).seconds/60))
 
 
 
