@@ -2,9 +2,15 @@ import pandas as pd
 import numpy as np
 import pyblp
 import os
+import json
+import matplotlib.pyplot as plt
 
+np.warnings.filterwarnings('ignore')
 def parameters():
-	directory = 'C:/users/mekurish/Dropbox/class/ECON ML/hw'
+	configLoc = os.path.join(os.getcwd(), 'config.json')
+	with open(configLoc, 'r') as file:
+		config = json.load(file)
+		directory = config['directory']
 	blpDataFile = 'withWendysBLPData.csv'
 	nevoOutput = 'cerealData.csv'
 	dataOut = 'withInstrumentsBLP.csv'
@@ -33,9 +39,18 @@ def runBLP(parms, data):
 	mc_problem = pyblp.Problem(product_formulations, data, integration=mc_integration)
 	pr_problem = pyblp.Problem(product_formulations, data, integration=pr_integration)
 	# this is not the ideal optimizer and needs to be changed once the code has been proven to work
-	bfgs = pyblp.Optimization('bfgs')
-	results1 = mc_problem.solve(sigma=np.ones((4, 4)), optimization=bfgs)
+	opt = pyblp.Optimization('l-bfgs-b')
+	#results1 = mc_problem.solve(sigma=np.ones((4, 4)), optimization=bfgs)
+	results1 = mc_problem.solve(sigma=np.eye(4), optimization=opt)
 	print(results1)
+	elasticities = results1.compute_elasticities()
+	diversions = results1.compute_diversion_ratios()
+	single_market = data['market_ids'] == 18
+	plt.colorbar(plt.matshow(elasticities[single_market]))
+	plt.colorbar(plt.matshow(diversions[single_market]))
+	plt.show()
+
+
 
 def fakeBLP():
 	product_data = pd.read_csv(pyblp.data.NEVO_PRODUCTS_LOCATION)
@@ -47,8 +62,16 @@ def fakeBLP():
 	mc_problem = pyblp.Problem(product_formulations, product_data, integration=mc_integration)
 	pr_problem = pyblp.Problem(product_formulations, product_data, integration=pr_integration)
 	bfgs = pyblp.Optimization('bfgs')
-	results1 = mc_problem.solve(sigma=np.ones((4, 4)), optimization=bfgs)
+	results1 = mc_problem.solve(sigma=np.eye(4), optimization=bfgs)
+	elasticities = results1.compute_elasticities()
+	diversions = results1.compute_diversion_ratios()
 	print(results1)
+	print(diversions)
+	single_market = product_data['market_ids'] == 'C01Q1'
+	plt.colorbar(plt.matshow(diversions[single_market]))
+
+
+
 
 def extractData(parms, data):
 	product_data = pd.read_csv(pyblp.data.NEVO_PRODUCTS_LOCATION)

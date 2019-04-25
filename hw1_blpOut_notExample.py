@@ -2,12 +2,16 @@
 import numpy as np
 import csv
 import random
+import json
 import os
 import datetime as dt
 import pytz
 
 def setPath():
-    path = 'C:/Users/mekurish/Dropbox/class/ECON ML/hw/'
+    configLoc = os.path.join(os.getcwd(), 'config.json')
+    with open(configLoc, 'r') as file:
+        config = json.load(file)
+        path = config['directory']
     return path
 
 def setFileNames():
@@ -17,7 +21,8 @@ def setFileNames():
 def genParms():
     np.random.seed(11)
     random.seed(11)
-    nMarkets = 100
+    nMarkets = 200
+    pplPerMarket = 500
     marketProbs = {'McDonalds': 0.85, 'BK': 0.75, 'Sweetgreen': 0.55, 'Wendy\'s': 0.55}
     itemDict = {'McDonalds': ["Quarter_Pounder", "McNuggets", 'Southwest_Salad'], 
                 'BK': ['Whopper', 'Chicken_Tenders'],
@@ -75,7 +80,7 @@ def genParms():
     sigmas = [0.2, 0.5, 0.5] 
     nus = [0, 0, 0]
     parameters = {'characteristics': characteristics, 'betas': betas, 'nus': nus, 'sigmas': sigmas, 
-                    'nPerMarket': 1000, 'nMarkets': nMarkets, 'mProbs': marketProbs}
+                    'nPerMarket': pplPerMarket, 'nMarkets': nMarkets, 'mProbs': marketProbs}
     return parameters
 
 def outChars(parms, path, names):
@@ -235,9 +240,9 @@ def main():
     # randomizes which firms are present in each market
     markets = genMarkets(parms)
     # 'dave' is the Wendy's parameter, to include wendy's products in the choice set or not
-    dave = False
-    choices = simulateChoices(parms, people, markets, dave=dave)
-    shares = marketShares(parms, choices, markets, dave=dave)
+    #dave = False
+    #choices = simulateChoices(parms, people, markets, dave=dave)
+    #shares = marketShares(parms, choices, markets, dave=dave)
     #print(shares['overall'])
     dave = True
     newChoices = simulateChoices(parms, people, markets, dave=dave)

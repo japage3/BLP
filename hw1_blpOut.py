@@ -13,7 +13,7 @@ def setPath():
 def genParms():
     np.random.seed(10)
     random.seed(10)
-    nMarkets = 100
+    nMarkets = 10000
     items = ["McDonalds", "BK", "Sweetgreen"]
     markets = range(0,nMarkets)
     characteristics = {}
@@ -43,7 +43,7 @@ def genParms():
     for i in range(0,3):
         nus.append(np.random.normal(0,.2))
 
-    parameters = {'characteristics': characteristics, 'ksais':ksais, 'betas': betas, 'price': -2.5, 'nus': nus, 'sigmas': sigmas, 'nPerMarket': 10000, 'numMarkets':nMarkets}
+    parameters = {'characteristics': characteristics, 'ksais':ksais, 'betas': betas, 'price': -2.5, 'nus': nus, 'sigmas': sigmas, 'nPerMarket': 1000, 'numMarkets':nMarkets}
     return parameters
     
 def addWendys(parms):
@@ -203,7 +203,6 @@ def generateEstimationData(shares, parms, path, fileName):
                 row.append(parms['characteristics'][prod][market]['fat'])
                 row.append(parms['characteristics'][prod][market]['salt'])
                 writer.writerow(row)
-
 
 def main():
     start = dt.datetime.now(pytz.utc)
