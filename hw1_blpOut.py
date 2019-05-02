@@ -7,7 +7,10 @@ import datetime as dt
 import pytz
 
 def setPath():
-    path = 'C:/Users/mekurish/Dropbox/class/ECON ML/hw/'
+    configLoc = os.path.join(os.getcwd(), 'config.json')
+    with open(configLoc, 'r') as file:
+        config = json.load(file)
+        path = config['directory']
     return path
 
 def genParms():
