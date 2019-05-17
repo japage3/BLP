@@ -1,11 +1,14 @@
 #import pandas as pd
 import numpy as np
+import scipy
 import csv
 import random
 import json
 import os
 import datetime as dt
 import pytz
+
+from pyblp.configurations.iteration import Iteration
 
 def setPath():
     configLoc = os.path.join(os.getcwd(), 'config.json')
@@ -14,6 +17,13 @@ def setPath():
         path = config['directory']
     return path
 
+def getPricingModel():
+    configLoc = os.path.join(os.getcwd(), 'config.json')
+    with open(configLoc, 'r') as file:
+        config = json.load(file)
+        model = config['firmPricingModel']
+    return model
+
 def setFileNames():
     names = {'characteristicsCSV': 'BLPTestChars.csv'}
     return names
@@ -21,7 +31,7 @@ def setFileNames():
 def genParms():
     np.random.seed(11)
     random.seed(11)
-    nMarkets = 200
+    nMarkets = 300
     pplPerMarket = 500
     marketProbs = {'McDonalds': 0.85, 'BK': 0.75, 'Sweetgreen': 0.55, 'Wendy\'s': 0.55}
     itemDict = {'McDonalds': ["Quarter_Pounder", "McNuggets", 'Southwest_Salad'], 
@@ -29,6 +39,7 @@ def genParms():
                 'Wendy\'s': ['Classic_Double', 'Wendys_Nuggets', 'Garden_Salad'],
                 'Sweetgreen': ['Chicken_Bowl', 'Rustic_Salad']
                     }
+    reverseItemLookup = genReverseLookup(itemDict)
     itemTypes = {"Quarter_Pounder": 'b', "McNuggets": 'c', 'Southwest_Salad': 's',
                   'Whopper': 'b', 'Chicken_Tenders': 'c',
                    'Classic_Double': 'b', 'Wendys_Nuggets': 'c', 'Garden_Salad': 's',
@@ -44,10 +55,19 @@ def genParms():
                     'Chicken_Bowl': 4, 'Rustic_Salad': 0}
     # as with the xi values, so with prices. Shares are very sensitive, so it was best to test them out in advance and keep minimally
     # variable values
+    # these prices are superseded by the price generation method (solvePrices) but since I made them somewhat reasonable I keep them
+    # as a basis to generate exogenous costs (which we need for Bertrand markups to work when prices *are* generated later)
     priceDict = {"Quarter_Pounder": 2.2, "McNuggets": 1.8, 'Southwest_Salad': 1.6,
                   'Whopper': 3.0, 'Chicken_Tenders': 2,
                    'Classic_Double': 2, 'Wendys_Nuggets': 2, 'Garden_Salad': 1.5,
                     'Chicken_Bowl': 5, 'Rustic_Salad': 7}
+    # firm an product codes are used later to output the data and also to order the ownership matrices consistently
+    firmCodes = {'McDonalds': 0, 'BK': 1, 'Sweetgreen': 2, 'Wendy\'s': 3}
+    prodCodes = {"Quarter_Pounder": 0, "McNuggets": 1, 'Southwest_Salad': 2,
+                  'Whopper': 3, 'Chicken_Tenders': 4,
+                   'Classic_Double': 5, 'Wendys_Nuggets': 6, 'Garden_Salad': 7,
+                    'Chicken_Bowl': 8, 'Rustic_Salad': 9}
+    reverseProdLookup = {v: k for k, v in prodCodes.items()}
     baselineChars = {}
     for firm in firms:
         for item in itemDict[firm]:
@@ -80,8 +100,16 @@ def genParms():
     sigmas = [0.2, 0.5, 0.5] 
     nus = [0, 0, 0]
     parameters = {'characteristics': characteristics, 'betas': betas, 'nus': nus, 'sigmas': sigmas, 
-                    'nPerMarket': pplPerMarket, 'nMarkets': nMarkets, 'mProbs': marketProbs}
+                    'nPerMarket': pplPerMarket, 'nMarkets': nMarkets, 'mProbs': marketProbs, 'firmCodes': firmCodes,
+                    'prodCodes': prodCodes, 'revLookup': reverseItemLookup, 'itemDict': itemDict, 'revCodes': reverseProdLookup}
     return parameters
+
+def genReverseLookup(itemDict):
+    out = {}
+    for key in itemDict:
+        for entry in itemDict[key]:
+            out[entry] = key
+    return out
 
 def outChars(parms, path, names):
     fileName = names['characteristicsCSV']
@@ -200,19 +228,183 @@ def marketShares(parms, choices, markets, dave=True):
     for prod in tOverall:
         tOverall[prod] = float(tOverall[prod])/float(nOverall)
     shares['overall'] = tOverall
-    return shares  
+    return shares 
+
+def convertParms(parameters, mark, markNum):
+    '''
+    unpacks parameters so that they can easily be passed to the objective function
+    so this doesn't have to happen with every optimizer iteration
+    '''
+    miniDict = {} 
+    betas = parameters['betas']
+    codes = parameters['prodCodes']
+    revCodes = parameters['revCodes']
+    items = parameters['itemDict']
+    prods = []
+    prices = []
+    xs = []
+    for firm in mark:
+        if mark[firm] == True:
+            for product in items[firm]:
+                miniDict[product] = parameters['characteristics'][firm][markNum][product]
+                prods.append(product)
+    for product in prods:
+        x = []
+        prices.append(miniDict[product]['price'])
+        x.append(miniDict[product]['protein'])
+        x.append(miniDict[product]['fat'])
+        x.append(miniDict[product]['ksai'])
+        xs.append(x)
+    sortable = []
+    for i, p in enumerate(prods):
+        sortable.append((codes[p], xs[i], prices[i]))
+    sortable.sort(key = lambda x: x[0])
+    positions = []
+    outx = []
+    outpx = []
+    for pair in sortable:
+        positions.append(pair[0])
+        outx.append(pair[1])
+        outpx.append(pair[2])
+    return (betas, positions, outx, outpx)
+
+def updateParameters(newPriceDict, parms):
+    '''
+    accepts newPriceDict which is a market-indexed list of prices and firm identities, goes through the parameters passed and updates
+    '''
+    revCodes = parms['revCodes']
+    lookup = {}
+    newParms = parms
+    for market in newPriceDict:
+        lookup[market] = {}
+        pricePos = newPriceDict[market]
+        prices = pricePos[0]
+        positions = pricePos[1]
+        for i, p in enumerate(positions):
+            lookup[market][revCodes[p]] = prices[i]
+    for firm in parms['characteristics']:
+        for market in parms['characteristics'][firm]:
+            for product in parms['characteristics'][firm][market]:
+                if product in lookup[market]:
+                    newParms['characteristics'][firm][market][product]['price'] = lookup[market][product]
+                else:
+                    newParms['characteristics'][firm][market][product]['price'] = np.nan
+    return newParms
+
+def derivatives(alpha, shareI, priceI, shareJ, priceJ, same):
+    if same:
+        out = -alpha*priceI*(1-shareI)
+    else:
+        out = alpha*priceJ*shareJ
+    return out
+
+def objFunction(prices, betas, xs, costs, ownership):
+    size = len(costs)
+    if len(betas) < 4:
+        betas.append(1)
+    alpha = betas[0]
+    betas = np.array(betas)
+    oldPrices = np.array(prices)
+    prices = np.array(prices)[np.newaxis]
+    costs = np.array(costs)
+    xs = np.matrix(xs)
+    bigX = np.concatenate((prices.T, xs), axis=1)
+    pre = bigX @ betas
+    expVec = np.exp(pre)
+    summ = np.sum(expVec) + 1
+    shares = expVec/summ
+    matrix = np.zeros((size, size))
+    prices = prices[0]
+    i = 0
+    shares = np.asarray(shares)[0]
+    for i in range(0, size):
+        for j in range(0, size):
+            if ownership[i][j] == 1:
+                if i == j:
+                    matrix[i][j] = derivatives(alpha, shares[i], prices[i], shares[j], prices[j], True) 
+                else:
+                    matrix[i][j] = derivatives(alpha, shares[i], prices[i], shares[j], prices[j], False)
+    objVec = shares - matrix @ (prices - costs)
+    objective = np.linalg.norm(objVec, 1)
+    return objective
+    
+def logitPrices(parms, markets):
+    '''
+    Solving for prices as a nested logit using newton's method
+    '''
+    marketPrices = {}
+    for mark in markets:
+        if mark%100 == 0:
+            print('computed market {}...'.format(mark))
+        ownMat = genOwnMat(parms, markets[mark])
+        costs = genCosts(parms, markets[mark], mark)
+        miniParms = convertParms(parms, markets[mark], mark)
+        betas = miniParms[0]
+        positions = miniParms[1]
+        xs = miniParms[2]
+        priceGuess = miniParms[3]
+        bds = scipy.optimize.Bounds(costs, np.inf)
+        result = scipy.optimize.minimize(objFunction, priceGuess, args=(betas, xs, costs, ownMat), bounds=bds)
+        newPrices = result.get('x')
+        marketPrices[mark] = [newPrices, positions]
+    parms = updateParameters(marketPrices, parms)
+    return parms
+
+def solvePrices(parms, markets):
+    '''
+     pyblp has a built in method for solving for price equilibria according to Morrow and Skerlos' (2011) method
+     this is slightly different from our method of computing shares 
+    
+    '''
+    out = parms
+    iteration = Iteration('simple', {'atol': 1e-12}) 
+    for mark in markets:
+        ownMat = genOwnMat(parms, markets[mark])
+        costs = genCosts(parms, markets[mark], mark)
+
+    assert False, "solvePrices method not complete"
+    return out
+
+def genOwnMat(parms, mark):
+    firmCodes = parms['firmCodes']
+    prodCodes = parms['prodCodes']
+    invProdCodes = {v: k for k, v in prodCodes.items()}
+    reverseLookup = parms['revLookup']
+    itemDict = parms['itemDict']
+    row = []
+    for firm in parms['characteristics']:
+        if mark[firm] == True:
+            for item in itemDict[firm]:
+                row.append(prodCodes[item])
+    row.sort()
+    size = len(row)
+    outMat = np.zeros((size, size))
+    for i, num1 in enumerate(row):
+        for j, num2 in enumerate(row):
+            if reverseLookup[invProdCodes[i]] == reverseLookup[invProdCodes[j]]: 
+                outMat[i, j] = 1
+    return outMat
+
+def genCosts(parms, mark, markNum):
+    preOut = []
+    prodCodes = parms['prodCodes']
+    itemDict = parms['itemDict']
+    for firm in parms['characteristics']:
+        if mark[firm] == True:
+            for item in itemDict[firm]:
+                px = parms['characteristics'][firm][markNum][item]['price']
+                cost = px * .75
+                preOut.append((prodCodes[item], cost))
+    preOut.sort(key = lambda x: x[0])
+    almostOut = [cost for i, cost in preOut]
+    out = np.array(almostOut)
+    return out
 
 def generateEstimationData(shares, parms, path, fileName):
     outFile = os.path.join(path, fileName)
-    firmCodes = {'McDonalds': 0, 'BK': 1, 'Sweetgreen': 2, 'Wendy\'s': 3}
-    prodCodes = {"Quarter_Pounder": 0, "McNuggets": 1, 'Southwest_Salad': 2,
-                  'Whopper': 3, 'Chicken_Tenders': 4,
-                   'Classic_Double': 5, 'Wendys_Nuggets': 6, 'Garden_Salad': 7,
-                    'Chicken_Bowl': 8, 'Rustic_Salad': 9}
-    reverseLookup = {"Quarter_Pounder": 'McDonalds', "McNuggets": 'McDonalds', 'Southwest_Salad': 'McDonalds',
-                  'Whopper': 'BK', 'Chicken_Tenders': 'BK',
-                   'Classic_Double': 'Wendy\'s', 'Wendys_Nuggets': 'Wendy\'s', 'Garden_Salad': 'Wendy\'s',
-                    'Chicken_Bowl': 'Sweetgreen', 'Rustic_Salad': 'Sweetgreen'}
+    firmCodes = parms['firmCodes']
+    prodCodes = parms['prodCodes']
+    reverseLookup = parms['revLookup']
     with open(outFile, 'w+', newline='') as file:
         writer = csv.writer(file, delimiter=',', quotechar='\"')
         header = ['market_ids','firm_ids', 'product_ids', 'shares', 'prices', 'protein', 'fat']
@@ -229,7 +421,7 @@ def generateEstimationData(shares, parms, path, fileName):
                 row.append(parms['characteristics'][firm][market][prod]['fat'])
                 writer.writerow(row)
 
-def main():
+def genFullDataForEstimation():
     start = dt.datetime.now(pytz.utc)
     path = setPath()
     fns = setFileNames()
@@ -239,24 +431,44 @@ def main():
     people = genPeople(parms, parms['nPerMarket'])
     # randomizes which firms are present in each market
     markets = genMarkets(parms)
+    pricing = getPricingModel()
+    if pricing == "full":
+        parms = solvePrices(parms, markets)
+    elif pricing == "Logit":
+        parms = logitPrices(parms, markets)
     # 'dave' is the Wendy's parameter, to include wendy's products in the choice set or not
-    #dave = False
-    #choices = simulateChoices(parms, people, markets, dave=dave)
-    #shares = marketShares(parms, choices, markets, dave=dave)
-    #print(shares['overall'])
     dave = True
     newChoices = simulateChoices(parms, people, markets, dave=dave)
     newShares = marketShares(parms, newChoices, markets, dave=dave)
-    path = setPath()
-    #sharesAsCSV(shares, path, 'noWendys.csv')
-    #sharesAsCSV(newShares, path, 'withWendys.csv')
-    #choicesAsCSV(choices, parms, path, 'noWendysChoices.csv')
-    #choicesAsCSV(newChoices, newParms, path, 'withWendysChoices.csv')
     generateEstimationData(newShares, parms, path, 'withWendysBLPData.csv')
+
+def genWithWithoutWendys():
+    start = dt.datetime.now(pytz.utc)
+    path = setPath()
+    fns = setFileNames()
+    parms = genParms()
+    outChars(parms, path, fns)
+    # need to gen prices endogenously *after* the markets are simulated 
+    people = genPeople(parms, parms['nPerMarket'])
+    # randomizes which firms are present in each market
+    markets = genMarkets(parms)
+    parms = solvePrices(parms, markets)
+    # 'dave' is the Wendy's parameter, to include wendy's products in the choice set or not
+    dave = False
+    choices = simulateChoices(parms, people, markets, dave=dave)
+    shares = marketShares(parms, choices, markets, dave=dave)
+    print(shares['overall'])
+    dave = True
+    newChoices = simulateChoices(parms, people, markets, dave=dave)
+    newShares = marketShares(parms, newChoices, markets, dave=dave)
+    sharesAsCSV(shares, path, 'noWendys.csv')
+    sharesAsCSV(newShares, path, 'withWendys.csv')
     print('generated {} markets each with {} observations in {} minutes'.format(parms['nMarkets'], parms['nPerMarket'], \
     (dt.datetime.now(pytz.utc) - start).seconds/60))
 
 
+def main():
+    genFullDataForEstimation()
 
 if __name__ == '__main__':
     main()
