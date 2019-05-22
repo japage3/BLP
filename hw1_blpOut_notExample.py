@@ -67,6 +67,13 @@ def genParms():
                   'Whopper': 3, 'Chicken_Tenders': 4,
                    'Classic_Double': 5, 'Wendys_Nuggets': 6, 'Garden_Salad': 7,
                     'Chicken_Bowl': 8, 'Rustic_Salad': 9}
+    # nests are used for nested logit price derivatives
+    nestDict = {"Quarter_Pounder": 0, "McNuggets": 1, 'Southwest_Salad': 2,
+                  'Whopper': 0, 'Chicken_Tenders': 1,
+                   'Classic_Double': 0, 'Wendys_Nuggets': 1, 'Garden_Salad': 2,
+                    'Chicken_Bowl': 1, 'Rustic_Salad': 2}
+    # nested logit correlation parameter
+    nestLambda = 1
     reverseProdLookup = {v: k for k, v in prodCodes.items()}
     baselineChars = {}
     for firm in firms:
@@ -87,21 +94,24 @@ def genParms():
         characteristics[firm] = {}
         for market in markets:
             characteristics[firm][market] = {}
+            marketCostShock = np.random.normal(0, 0.5)
             for item in itemDict[firm]:
                 characteristics[firm][market][item]= {}
                 characteristics[firm][market][item]['protein'] = baselineChars[item]['protein']
                 characteristics[firm][market][item]['fat'] = baselineChars[item]['fat']
-                corrShocks = np.random.multivariate_normal([0, 0], corrMatrix)
-                pShock = corrShocks[0]
-                ksShock = corrShocks[1]
-                characteristics[firm][market][item]['price'] = priceDict[item] + pShock
-                characteristics[firm][market][item]['ksai'] = ksaiDict[item] + ksShock
+                #corrShocks = np.random.multivariate_normal([0, 0], corrMatrix)
+                #pShock = corrShocks[0]
+                #ksShock = corrShocks[1]
+                characteristics[firm][market][item]['price'] = priceDict[item] + marketCostShock
+                characteristics[firm][market][item]['ksai'] = ksaiDict[item]
+                characteristics[firm][market][item]['supply_inst'] = marketCostShock
     betas = [-0.5, 0.8, -0.2] # betas are for price, protein, fat - respectively
     sigmas = [0.2, 0.5, 0.5] 
     nus = [0, 0, 0]
     parameters = {'characteristics': characteristics, 'betas': betas, 'nus': nus, 'sigmas': sigmas, 
                     'nPerMarket': pplPerMarket, 'nMarkets': nMarkets, 'mProbs': marketProbs, 'firmCodes': firmCodes,
-                    'prodCodes': prodCodes, 'revLookup': reverseItemLookup, 'itemDict': itemDict, 'revCodes': reverseProdLookup}
+                    'prodCodes': prodCodes, 'revLookup': reverseItemLookup, 'itemDict': itemDict, 'revCodes': reverseProdLookup,
+                    'nests': nestDict, 'nestingLambda': nestLambda}
     return parameters
 
 def genReverseLookup(itemDict):
@@ -291,12 +301,19 @@ def updateParameters(newPriceDict, parms):
                     newParms['characteristics'][firm][market][product]['price'] = np.nan
     return newParms
 
-def derivatives(alpha, shareI, priceI, shareJ, priceJ, same):
+def derivatives(alpha, shareI, shareJ, same):
     if same:
-        out = -alpha*priceI*(1-shareI)
+        out = -alpha*shareI*(1-shareI)
     else:
-        out = alpha*priceJ*shareJ
+        out = alpha*shareI*shareJ
     return out
+
+def nestedDerivatives(alpha, shareI, priceI, shareJ, priceJ, same):
+    
+    pass
+
+def nestedShares(prices, betas, xs):
+    pass
 
 def objFunction(prices, betas, xs, costs, ownership):
     size = len(costs)
@@ -321,20 +338,20 @@ def objFunction(prices, betas, xs, costs, ownership):
         for j in range(0, size):
             if ownership[i][j] == 1:
                 if i == j:
-                    matrix[i][j] = derivatives(alpha, shares[i], prices[i], shares[j], prices[j], True) 
+                    matrix[i][j] = derivatives(alpha, shares[i], shares[j], True) 
                 else:
-                    matrix[i][j] = derivatives(alpha, shares[i], prices[i], shares[j], prices[j], False)
+                    matrix[i][j] = derivatives(alpha, shares[i], shares[j], False)
     objVec = shares - matrix @ (prices - costs)
     objective = np.linalg.norm(objVec, 1)
     return objective
     
-def logitPrices(parms, markets):
+def logitPrices(parms, markets, nested=False):
     '''
-    Solving for prices as a nested logit using newton's method
+    Solving for prices as a (nested) logit using scipy optimizer
     '''
     marketPrices = {}
     for mark in markets:
-        if mark%100 == 0:
+        if mark % 50 == 0:
             print('computed market {}...'.format(mark))
         ownMat = genOwnMat(parms, markets[mark])
         costs = genCosts(parms, markets[mark], mark)
@@ -440,6 +457,7 @@ def genFullDataForEstimation():
     dave = True
     newChoices = simulateChoices(parms, people, markets, dave=dave)
     newShares = marketShares(parms, newChoices, markets, dave=dave)
+    print(newShares['overall'])
     generateEstimationData(newShares, parms, path, 'withWendysBLPData.csv')
 
 def genWithWithoutWendys():
